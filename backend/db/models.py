@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from sqlalchemy import (
     BigInteger, Text, DateTime, Boolean, Time, DECIMAL, Integer, ARRAY,
-    ForeignKey
+    ForeignKey, UniqueConstraint
 )
 
 from sqlalchemy.ext.asyncio import (
@@ -41,6 +41,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     orders = relationship("Order", back_populates="user")
+    favorites = relationship("Favorite", back_populates="user", cascade="all, delete-orphan")
 
 
 class CoffeeShop(Base):
@@ -65,6 +66,7 @@ class CoffeeShop(Base):
     categories = relationship("MenuCategory", back_populates="coffee_shop")
     menu_items = relationship("MenuItem", back_populates="coffee_shop")
     orders = relationship("Order", back_populates="coffee_shop")
+    favorites = relationship("Favorite", back_populates="coffee_shop", cascade="all, delete-orphan")
 
 
 class MenuCategory(Base):
@@ -124,6 +126,21 @@ class OrderItem(Base):
 
     order = relationship("Order", back_populates="items")
     menu_item = relationship("MenuItem", back_populates="order_items")
+
+
+class Favorite(Base):
+    __tablename__ = "favorites"
+    __table_args__ = (
+        UniqueConstraint("telegram_id", "coffee_shop_id", name="uq_favorite_user_shop"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    coffee_shop_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("coffee_shops.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="favorites")
+    coffee_shop = relationship("CoffeeShop", back_populates="favorites")
 
 
 @asynccontextmanager

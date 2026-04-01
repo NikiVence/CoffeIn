@@ -80,7 +80,7 @@ class AddToCartRequest(BaseModel):
     tg_id: int = Field(..., description="Telegram ID пользователя")
     coffee_shop_id: UUID = Field(..., description="UUID кофейни")
     menu_item_id: UUID = Field(..., description="UUID пункта меню")
-    quantity: int = Field(1, ge=1, description="Количество товара")
+    quantity: int = Field(1, ge=-1, description="Количество товара")
 
 
 class RemoveFromCartRequest(BaseModel):
@@ -109,5 +109,17 @@ class CartResponse(BaseModel):
     items: List[CartItemResponse] = []
     created_at: datetime
     
+    class Config:
+        from_attributes = True
+
+
+class FavoriteRequest(BaseModel):
+    tg_id: int = Field(..., description="Telegram ID пользователя")
+    coffee_shop_id: UUID = Field(..., description="UUID кофейни")
+
+
+class FavoriteResponse(BaseModel):
+    coffee_shops: List[CoffeeShopResponse] = []
+
     class Config:
         from_attributes = True

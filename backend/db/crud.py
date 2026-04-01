@@ -1,6 +1,6 @@
 from sqlalchemy import select, update, delete
 from sqlalchemy.orm import selectinload
-from .models import CoffeeShop, MenuCategory, Order, OrderItem, MenuItem, User, get_session
+from .models import CoffeeShop, MenuCategory, Order, OrderItem, MenuItem, User, Favorite, get_session
 import datetime
 import uuid
 
@@ -78,7 +78,66 @@ async def get_coffee_shop_menu(coffee_shop_id):
         return categories_data
 
 
-async def add_to_cart(tg_id: int, coffee_shop_id, menu_item_id):
+async def add_favorite(tg_id: int, coffee_shop_id):
+    async with get_session() as session:
+        # Проверяем, существует ли кофейня
+        shop_result = await session.execute(
+            select(CoffeeShop).where(CoffeeShop.id == coffee_shop_id)
+        )
+        if not shop_result.scalar_one_or_none():
+            return None
+
+        # Проверяем, не добавлена ли уже
+        favorite_result = await session.execute(
+            select(Favorite).where(
+                Favorite.telegram_id == tg_id,
+                Favorite.coffee_shop_id == coffee_shop_id,
+            )
+        )
+        favorite = favorite_result.scalar_one_or_none()
+
+        if favorite:
+            return favorite
+
+        new_favorite = Favorite(
+            id=uuid.uuid4(),
+            telegram_id=tg_id,
+            coffee_shop_id=coffee_shop_id,
+        )
+        session.add(new_favorite)
+        await session.commit()
+        await session.refresh(new_favorite)
+
+        return new_favorite
+
+
+async def remove_favorite(tg_id: int, coffee_shop_id):
+    async with get_session() as session:
+        result = await session.execute(
+            select(Favorite).where(
+                Favorite.telegram_id == tg_id,
+                Favorite.coffee_shop_id == coffee_shop_id,
+            )
+        )
+        favorite = result.scalar_one_or_none()
+        if not favorite:
+            return False
+
+        await session.delete(favorite)
+        await session.commit()
+        return True
+
+
+async def get_favorites(tg_id: int):
+    async with get_session() as session:
+        result = await session.execute(
+            select(Favorite).where(Favorite.telegram_id == tg_id).options(selectinload(Favorite.coffee_shop))
+        )
+        favorites = result.scalars().all()
+        return [favorite.coffee_shop for favorite in favorites]
+
+
+async def add_to_cart(tg_id: int, coffee_shop_id, menu_item_id, quantity: int):
     async with get_session() as session:
         # Получаем или создаём корзину пользователя для этого кофейшопа
         result = await session.execute(
@@ -111,34 +170,61 @@ async def add_to_cart(tg_id: int, coffee_shop_id, menu_item_id):
             return None
         
         # Проверяем, есть ли уже такой товар в корзине
-        order_result = await session.execute(
+        order_item_result = await session.execute(
             select(OrderItem)
             .where(OrderItem.order_id == order.id)
             .where(OrderItem.menu_item_id == menu_item_id)
         )
-        order_item = order_result.scalar_one_or_none()
+        order_item = order_item_result.scalar_one_or_none()
+        
+        # Флаг, нужно ли удалить корзину
+        should_delete_order = False
         
         if order_item:
-            # Обновляем количество
-            order_item.quantity += 1
-            order_item.total_price = order_item.unit_price * order_item.quantity
+            new_quantity = order_item.quantity + quantity
+            
+            if new_quantity <= 0:
+                # Удаляем только позицию товара
+                await session.delete(order_item)
+                # Проверяем, остались ли ещё товары в корзине
+                remaining_items_result = await session.execute(
+                    select(OrderItem).where(OrderItem.order_id == order.id)
+                )
+                remaining_items = remaining_items_result.scalars().all()
+                
+                # Если товаров не осталось, отмечаем корзину на удаление
+                if not remaining_items:
+                    should_delete_order = True
+            else:
+                # Обновляем количество
+                order_item.quantity = new_quantity
+                order_item.total_price = order_item.unit_price * order_item.quantity
         else:
-            # Добавляем новый товар
-            order_item = OrderItem(
-                id=uuid.uuid4(),
-                order_id=order.id,
-                menu_item_id=menu_item_id,
-                quantity=1,
-                unit_price=menu_item.base_price,
-                total_price=menu_item.base_price * 1,
-            )
-            session.add(order_item)
+            # Добавляем новый товар (только если quantity > 0)
+            if quantity > 0:
+                order_item = OrderItem(
+                    id=uuid.uuid4(),
+                    order_id=order.id,
+                    menu_item_id=menu_item_id,
+                    quantity=quantity,
+                    unit_price=menu_item.base_price,
+                    total_price=menu_item.base_price * quantity,
+                )
+                session.add(order_item)
+        
+        # Если корзину нужно удалить
+        if should_delete_order:
+            await session.delete(order)
+            await session.commit()
+            return "deleted"
         
         # Получаем все товары в корзине и пересчитываем total_amount
         all_items_result = await session.execute(
             select(OrderItem).where(OrderItem.order_id == order.id)
         )
         all_items = all_items_result.scalars().all()
+        
+        # Пересчитываем общую сумму
         order.total_amount = sum(item.total_price for item in all_items)
         
         await session.commit()
