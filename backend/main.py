@@ -82,3 +82,12 @@ async def get_cart_handler(tg_id: int, coffee_shop_id: str):
         return {"error": "Корзина пуста"}
     return cart
 
+
+@app.delete("/cart")
+async def remove_from_cart_handler(tg_id: int, order_item_id: str):
+    from uuid import UUID
+    cart = await remove_from_cart(tg_id, UUID(order_item_id))
+    if cart is None:
+        return {"error": "Товар не найден или корзина пуста"}
+    return cart
+

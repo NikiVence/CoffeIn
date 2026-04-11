@@ -220,7 +220,7 @@ async def add_to_cart(tg_id: int, coffee_shop_id, menu_item_id, quantity: int):
         
         # Получаем все товары в корзине и пересчитываем total_amount
         all_items_result = await session.execute(
-            select(OrderItem).where(OrderItem.order_id == order.id)
+            select(OrderItem).where(OrderItem.order_id == order.id).options(selectinload(OrderItem.menu_item))
         )
         all_items = all_items_result.scalars().all()
         
@@ -244,6 +244,17 @@ async def add_to_cart(tg_id: int, coffee_shop_id, menu_item_id, quantity: int):
                     "quantity": item.quantity,
                     "unit_price": item.unit_price,
                     "total_price": item.total_price,
+                    "product": {
+                        "id": item.menu_item.id,
+                        "coffee_shop_id": item.menu_item.coffee_shop_id,
+                        "category_id": item.menu_item.category_id,
+                        "name": item.menu_item.name,
+                        "description": item.menu_item.description,
+                        "base_price": item.menu_item.base_price,
+                        "image_url": item.menu_item.image_url,
+                        "is_available": item.menu_item.is_available,
+                        "created_at": item.menu_item.created_at,
+                    }
                 }
                 for item in all_items
             ]
@@ -255,7 +266,7 @@ async def remove_from_cart(tg_id: int, order_item_id):
     async with get_session() as session:
         # Получаем товар
         result = await session.execute(
-            select(OrderItem).where(OrderItem.id == order_item_id)
+            select(OrderItem).where(OrderItem.id == order_item_id).options(selectinload(OrderItem.order))
         )
         order_item = result.scalar_one_or_none()
         
@@ -263,13 +274,14 @@ async def remove_from_cart(tg_id: int, order_item_id):
             return None
         
         order_id = order_item.order_id
+        coffee_shop_id = order_item.order.coffee_shop_id
         
         # Удаляем товар
-        session.delete(order_item)
+        await session.delete(order_item)
         
         # Получаем оставшиеся товары в корзине
         remaining_items_result = await session.execute(
-            select(OrderItem).where(OrderItem.order_id == order_id)
+            select(OrderItem).where(OrderItem.order_id == order_id).options(selectinload(OrderItem.menu_item))
         )
         remaining_items = remaining_items_result.scalars().all()
         
@@ -286,7 +298,40 @@ async def remove_from_cart(tg_id: int, order_item_id):
         
         await session.commit()
         
-        return True
+        # Если товаров не осталось, возвращаем пустую корзину или None
+        if not remaining_items:
+            return None
+        
+        return {
+            "id": order.id,
+            "telegram_id": order.telegram_id,
+            "coffee_shop_id": order.coffee_shop_id,
+            "status": order.status,
+            "total_amount": order.total_amount,
+            "created_at": order.created_at,
+            "items": [
+                {
+                    "id": item.id,
+                    "order_id": item.order_id,
+                    "menu_item_id": item.menu_item_id,
+                    "quantity": item.quantity,
+                    "unit_price": item.unit_price,
+                    "total_price": item.total_price,
+                    "product": {
+                        "id": item.menu_item.id,
+                        "coffee_shop_id": item.menu_item.coffee_shop_id,
+                        "category_id": item.menu_item.category_id,
+                        "name": item.menu_item.name,
+                        "description": item.menu_item.description,
+                        "base_price": item.menu_item.base_price,
+                        "image_url": item.menu_item.image_url,
+                        "is_available": item.menu_item.is_available,
+                        "created_at": item.menu_item.created_at,
+                    }
+                }
+                for item in remaining_items
+            ]
+        }
 
 
 async def get_cart(tg_id: int, coffee_shop_id):
@@ -297,7 +342,7 @@ async def get_cart(tg_id: int, coffee_shop_id):
             .where(Order.telegram_id == tg_id)
             .where(Order.coffee_shop_id == coffee_shop_id)
             .where(Order.status == "cart")
-            .options(selectinload(Order.items))
+            .options(selectinload(Order.items).selectinload(OrderItem.menu_item))
         )
         order = result.scalar_one_or_none()
         
@@ -319,6 +364,17 @@ async def get_cart(tg_id: int, coffee_shop_id):
                     "quantity": item.quantity,
                     "unit_price": item.unit_price,
                     "total_price": item.total_price,
+                    "product": {
+                        "id": item.menu_item.id,
+                        "coffee_shop_id": item.menu_item.coffee_shop_id,
+                        "category_id": item.menu_item.category_id,
+                        "name": item.menu_item.name,
+                        "description": item.menu_item.description,
+                        "base_price": item.menu_item.base_price,
+                        "image_url": item.menu_item.image_url,
+                        "is_available": item.menu_item.is_available,
+                        "created_at": item.menu_item.created_at,
+                    }
                 }
                 for item in order.items
             ]

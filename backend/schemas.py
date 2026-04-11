@@ -95,6 +95,7 @@ class CartItemResponse(BaseModel):
     quantity: int
     unit_price: int
     total_price: int
+    product: MenuItemResponse
     
     class Config:
         from_attributes = True
